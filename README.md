@@ -108,3 +108,8 @@ bleiben an ihrem Programm hängen.
 
 Die vorinstallierte Liste ist die neue CALLERLAB Mainstream-Liste, effective
 September 1, 2026.
+
+## Lizenz
+
+Dieses Projekt steht unter der GNU General Public License v3.0 or later
+(`GPL-3.0-or-later`). Details stehen in `LICENSE`.

@@ -3,6 +3,8 @@ name = "class-coordinator"
 version = "0.1.0"
 description = "Square dance class coordination web app"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = [
   "bcrypt>=4.1",
 ]
