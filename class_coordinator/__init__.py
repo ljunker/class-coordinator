@@ -1,0 +1,1 @@
+"""Class Coordinator application package."""

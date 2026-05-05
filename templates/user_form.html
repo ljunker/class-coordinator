@@ -1,0 +1,13 @@
+<h1>Account anlegen</h1>
+<form method="post" action="/admin/users/new" class="stack wide-form">
+  <label>Anzeigename <input name="display_name" required></label>
+  <label>Benutzername <input name="username" required autocomplete="off"></label>
+  <label>Passwort <input type="password" name="password" required autocomplete="new-password"></label>
+  <label>Rolle
+    <select name="role">
+      <option value="caller">Caller</option>
+      <option value="admin">Admin</option>
+    </select>
+  </label>
+  <button type="submit">Account anlegen</button>
+</form>

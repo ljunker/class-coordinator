@@ -1,0 +1,32 @@
+services:
+  class-coordinator:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 41234
+      CLASS_COORDINATOR_DB: /data/class_coordinator.sqlite3
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+    ports:
+      - "127.0.0.1:41234:41234"
+    volumes:
+      - class-coordinator-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "uv",
+          "run",
+          "--frozen",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:41234/login', timeout=5).read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  class-coordinator-data:

@@ -1,0 +1,27 @@
+<h1>$title</h1>
+<form method="post" action="$action" class="stack wide-form">
+  <label>Name
+    <input name="name" required value="$name">
+  </label>
+  <label>Programm
+    <select name="program_id">$program_options</select>
+  </label>
+  <label>Ort
+    <input name="location" value="$location">
+  </label>
+  <label>Startdatum
+    <input type="date" name="starts_on" value="$starts_on">
+  </label>
+  <label>Notizen
+    <textarea name="notes" rows="4">$notes</textarea>
+  </label>
+  <label class="check-row">
+    <input type="checkbox" name="active" value="1" $active_checked>
+    <span>aktiv</span>
+  </label>
+  <fieldset>
+    <legend>Caller-Zugriff</legend>
+    $caller_checks
+  </fieldset>
+  <button type="submit">Speichern</button>
+</form>

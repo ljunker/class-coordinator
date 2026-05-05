@@ -1,0 +1,30 @@
+<div class="toolbar">
+  <div>
+    <h1>$name</h1>
+    <p>$program_name &middot; $location &middot; Start $starts_on</p>
+  </div>
+  $admin_action
+</div>
+<div class="filter-tabs">
+  $filter_tabs
+</div>
+<form method="post" action="/classes/$id/mark" class="mark-form">
+  $mark_bar
+  <table class="figures">
+    <thead>
+      <tr>
+        <th>Figure</th>
+        <th>zuerst geteacht</th>
+        <th>zuletzt geteacht</th>
+        <th>zuletzt wiederholt</th>
+        <th>Teach</th>
+        <th>Review</th>
+      </tr>
+    </thead>
+    <tbody>$figure_rows</tbody>
+  </table>
+</form>
+<section>
+  <h2>Letzte Einträge</h2>
+  <ul class="recent">$recent_items</ul>
+</section>

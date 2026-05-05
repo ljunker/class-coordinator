@@ -1,0 +1,296 @@
+{
+  "key": "mainstream-2026",
+  "name": "Mainstream",
+  "effective_date": "2026-09-01",
+  "source_name": "CALLERLAB (New) Mainstream Suggested Teaching Order",
+  "source_url": "New-Mainstream-Program-Teaching-Order-2026-09-01.pdf",
+  "families": [
+    {
+      "number": "1",
+      "name": "Circle Family",
+      "calls": [
+        "Circle Left/Right (1/4, 1/2, 3/4, Full)",
+        "Circle of 4 Left/Right (1/4, 1/2, 3/4, Full)",
+        "Single Circle Left/Right (1/4, 1/2, 3/4, Full)"
+      ]
+    },
+    {
+      "number": "2",
+      "name": "Dosado",
+      "calls": ["Dosado"]
+    },
+    {
+      "number": "3",
+      "name": "Promenade Family",
+      "calls": [
+        "Couples Promenade",
+        "Single File Promenade",
+        "Star Promenade",
+        "Wrong Way Promenade"
+      ]
+    },
+    {
+      "number": "4",
+      "name": "Arm Turn Family",
+      "calls": ["Right/Left Arm Turn", "Allemande Left/Right"]
+    },
+    {
+      "number": "5",
+      "name": "Star Right/Left",
+      "calls": ["Star Right/Left"]
+    },
+    {
+      "number": "6",
+      "name": "Right and Left Grand Family",
+      "calls": ["Right and Left Grand", "Weave the Ring", "Wrong Way Grand"]
+    },
+    {
+      "number": "7",
+      "name": "Pass Thru",
+      "calls": ["Pass Thru"]
+    },
+    {
+      "number": "8",
+      "name": "Wheel Around / Reverse Wheel Around",
+      "calls": ["Wheel Around", "Reverse Wheel Around"]
+    },
+    {
+      "number": "9",
+      "name": "Courtesy Turn",
+      "calls": ["Courtesy Turn"]
+    },
+    {
+      "number": "10",
+      "name": "Right and Left Thru",
+      "calls": ["Right and Left Thru"]
+    },
+    {
+      "number": "11",
+      "name": "Swing",
+      "calls": ["Swing"]
+    },
+    {
+      "number": "12",
+      "name": "Ladies Chain Family",
+      "calls": [
+        "Ladies Chain, (Ladies Chain 3/4)",
+        "Four Ladies Chain, (Chain 3/4)",
+        "Chain Down the Line"
+      ]
+    },
+    {
+      "number": "13",
+      "name": "Half Sashay Family",
+      "calls": ["Half Sashay", "Rollaway", "Ladies In, Men Sashay"]
+    },
+    {
+      "number": "14",
+      "name": "Turn Back Family",
+      "calls": ["U-Turn Back", "Backtrack"]
+    },
+    {
+      "number": "15",
+      "name": "Separate Family",
+      "calls": [
+        "Separate",
+        "Separate Around 1 or 2 to a Line",
+        "Separate Around 1 or 2 into the middle"
+      ]
+    },
+    {
+      "number": "16",
+      "name": "Lead Right / Lead Left",
+      "calls": ["Lead Right / Lead Left"]
+    },
+    {
+      "number": "17",
+      "name": "Veer Left / Veer Right",
+      "calls": ["Veer Left / Veer Right"]
+    },
+    {
+      "number": "18",
+      "name": "Star Thru",
+      "calls": ["Star Thru"]
+    },
+    {
+      "number": "19",
+      "name": "Circulate Family",
+      "calls": [
+        "Couples Circulate",
+        "(Named Dancers) Circulate",
+        "All Eight Circulate",
+        "Single File (Column) Circulate",
+        "Box/Split Circulate"
+      ]
+    },
+    {
+      "number": "20",
+      "name": "Bend the Line",
+      "calls": ["Bend the Line"]
+    },
+    {
+      "number": "21",
+      "name": "Square Thru / Left Square Thru",
+      "calls": ["Square Thru / Left Square Thru"]
+    },
+    {
+      "number": "22",
+      "name": "Split Two",
+      "calls": ["Split Two"]
+    },
+    {
+      "number": "23",
+      "name": "Grand Square",
+      "calls": ["Grand Square"]
+    },
+    {
+      "number": "24",
+      "name": "Double Pass Thru",
+      "calls": ["Double Pass Thru"]
+    },
+    {
+      "number": "25",
+      "name": "First Couple Go Left/Right, Next Couple Go Right/Left",
+      "calls": ["First Couple Go Left/Right, Next Couple Go Right/Left"]
+    },
+    {
+      "number": "26",
+      "name": "Wheel and Deal",
+      "calls": ["Wheel and Deal"]
+    },
+    {
+      "number": "27",
+      "name": "California Twirl",
+      "calls": ["California Twirl"]
+    },
+    {
+      "number": "28",
+      "name": "Slide Thru",
+      "calls": ["Slide Thru"]
+    },
+    {
+      "number": "29",
+      "name": "Dive Thru",
+      "calls": ["Dive Thru"]
+    },
+    {
+      "number": "30",
+      "name": "Box the Gnat",
+      "calls": ["Box the Gnat"]
+    },
+    {
+      "number": "31",
+      "name": "Ocean Wave Family",
+      "calls": [
+        "Alamo Style",
+        "Balance",
+        "Step to a Wave",
+        "Dosado to a Wave",
+        "Single Circle to a Wave"
+      ]
+    },
+    {
+      "number": "32",
+      "name": "Trade Family",
+      "calls": [
+        "Couples Trade",
+        "(Named Dancers) Trade",
+        "Right/Left Hand Trade",
+        "Partner Trade"
+      ]
+    },
+    {
+      "number": "33",
+      "name": "Swing Thru / Left Swing Thru",
+      "calls": ["Swing Thru / Left Swing Thru"]
+    },
+    {
+      "number": "34",
+      "name": "Run / Cross Run",
+      "calls": ["Run", "Cross Run"]
+    },
+    {
+      "number": "35",
+      "name": "Pass the Ocean",
+      "calls": ["Pass the Ocean"]
+    },
+    {
+      "number": "36",
+      "name": "Extend",
+      "calls": ["Extend"]
+    },
+    {
+      "number": "37",
+      "name": "Flutterwheel / Reverse Flutterwheel",
+      "calls": ["Flutterwheel", "Reverse Flutterwheel"]
+    },
+    {
+      "number": "38",
+      "name": "Sweep a Quarter",
+      "calls": ["Sweep a Quarter"]
+    },
+    {
+      "number": "39",
+      "name": "Trade By",
+      "calls": ["Trade By"]
+    },
+    {
+      "number": "40",
+      "name": "Ferris Wheel",
+      "calls": ["Ferris Wheel"]
+    },
+    {
+      "number": "41",
+      "name": "Zoom",
+      "calls": ["Zoom"]
+    },
+    {
+      "number": "42",
+      "name": "Touch a Quarter",
+      "calls": ["Touch a Quarter"]
+    },
+    {
+      "number": "43",
+      "name": "Hinge Family",
+      "calls": ["Single Hinge", "Couples Hinge"]
+    },
+    {
+      "number": "44",
+      "name": "Centers In",
+      "calls": ["Centers In"]
+    },
+    {
+      "number": "45",
+      "name": "Cast Off Three-Quarters",
+      "calls": ["Cast Off Three-Quarters"]
+    },
+    {
+      "number": "46",
+      "name": "Spin the Top",
+      "calls": ["Spin the Top"]
+    },
+    {
+      "number": "47",
+      "name": "Scoot Back",
+      "calls": ["Scoot Back"]
+    },
+    {
+      "number": "48",
+      "name": "Fold / Cross Fold",
+      "calls": ["Fold", "Cross Fold"]
+    },
+    {
+      "number": "49",
+      "name": "Tag the Line Family",
+      "calls": [
+        "Tag the Line (In / Out / Left / Right)",
+        "Fraction (1/4, 1/2, 3/4) Tag"
+      ]
+    },
+    {
+      "number": "50",
+      "name": "Recycle",
+      "calls": ["Recycle (from Waves only)"]
+    }
+  ]
+}
