@@ -47,15 +47,21 @@ Die App lauscht im Container auf Port `41234` und wird durch Compose nur auf
 `127.0.0.1:41234` veröffentlicht. Die SQLite-Datenbank liegt persistent im
 Volume `class-coordinator-data` unter `/data/class_coordinator.sqlite3`.
 
-Für einen Nginx Reverse Proxy kann die App lokal so angebunden werden:
+Für einen Nginx Reverse Proxy unter `/class` kann die App lokal so angebunden
+werden:
 
 ```nginx
-location / {
+location = /class {
+    return 301 /class/$is_args$args;
+}
+
+location ^~ /class/ {
     proxy_pass http://127.0.0.1:41234;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /class;
 }
 ```
 

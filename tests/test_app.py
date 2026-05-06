@@ -97,6 +97,36 @@ class AppTests(unittest.TestCase):
         self.assertFalse(self.security.verify_password("wrong", encoded))
         self.assertTrue(encoded.startswith("$2b$13$"))
 
+    def test_forwarded_prefix_rewrites_redirects_and_html_links(self):
+        from class_coordinator.web import App, redirect
+
+        app = App()
+        status, headers, body = app.with_prefix(redirect("/login"), "/class")
+
+        self.assertEqual(status, 303)
+        self.assertEqual(dict(headers)["Location"], "/class/login")
+
+        status, headers, body = app.with_prefix(
+            (
+                200,
+                [("Content-Type", "text/html; charset=utf-8")],
+                b'<a href="/classes">x</a><form action="/logout"></form>',
+            ),
+            "/class",
+        )
+
+        self.assertIn(b'href="/class/classes"', body)
+        self.assertIn(b'action="/class/logout"', body)
+
+    def test_forwarded_prefix_is_stripped_for_routing(self):
+        from class_coordinator.web import App
+
+        app = App()
+
+        self.assertEqual(app.strip_prefix("/class/classes/1", "/class"), "/classes/1")
+        self.assertEqual(app.strip_prefix("/class", "/class"), "/")
+        self.assertEqual(app.strip_prefix("/classes/1", "/class"), "/classes/1")
+
     def test_class_form_can_render_name_field(self):
         from class_coordinator.web import App
 

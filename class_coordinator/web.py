@@ -76,72 +76,125 @@ class App:
 
     def handle(self, handler: BaseHTTPRequestHandler) -> Response:
         parsed = urlparse(handler.path)
-        path = parsed.path.rstrip("/") or "/"
+        prefix = self.forwarded_prefix(handler)
+        request_path = self.strip_prefix(parsed.path, prefix)
+        path = request_path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
         user = self.current_user(handler)
 
-        if parsed.path.startswith("/static/"):
-            return self.static_file(parsed.path)
+        if request_path.startswith("/static/"):
+            return self.with_prefix(self.static_file(request_path), prefix)
         if handler.command == "GET" and path == "/login":
-            return self.login_page(consume_flash(query))
+            return self.with_prefix(self.login_page(consume_flash(query)), prefix)
         if handler.command == "POST" and path == "/login":
-            return self.login(handler)
+            return self.with_prefix(self.login(handler), prefix)
         if handler.command == "POST" and path == "/logout":
-            return self.logout(handler)
+            return self.with_prefix(self.logout(handler), prefix)
         if handler.command == "GET" and path.startswith("/classes/") and path.endswith("/status.json"):
             class_id = self.path_id(path.removesuffix("/status.json"), "/classes/")
             if class_id is not None:
-                return self.class_status_json(user, class_id)
+                return self.with_prefix(self.class_status_json(user, class_id), prefix)
         if handler.command == "GET" and path.startswith("/classes/"):
             class_id = self.path_id(path, "/classes/")
             if class_id is not None:
-                return self.class_detail(
-                    user,
-                    class_id,
-                    consume_flash(query),
-                    view=single(query, "view", "all"),
+                return self.with_prefix(
+                    self.class_detail(
+                        user,
+                        class_id,
+                        consume_flash(query),
+                        view=single(query, "view", "all"),
+                    ),
+                    prefix,
                 )
         if not user:
-            return redirect("/login")
+            return self.with_prefix(redirect("/login"), prefix)
         if handler.command == "GET" and path == "/":
-            return redirect("/classes")
+            return self.with_prefix(redirect("/classes"), prefix)
         if handler.command == "GET" and path == "/classes":
-            return self.classes_page(user, consume_flash(query))
+            return self.with_prefix(self.classes_page(user, consume_flash(query)), prefix)
         if handler.command == "GET" and path == "/profile":
-            return self.profile_page(user, consume_flash(query))
+            return self.with_prefix(self.profile_page(user, consume_flash(query)), prefix)
         if handler.command == "POST" and path == "/profile":
-            return self.update_profile(handler, user)
+            return self.with_prefix(self.update_profile(handler, user), prefix)
         if handler.command == "GET" and path == "/classes/new":
-            return self.require_admin(user, lambda: self.class_form(user, None))
+            return self.with_prefix(self.require_admin(user, lambda: self.class_form(user, None)), prefix)
         if handler.command == "POST" and path == "/classes/new":
-            return self.require_admin(user, lambda: self.save_class(handler, None))
+            return self.with_prefix(self.require_admin(user, lambda: self.save_class(handler, None)), prefix)
         if handler.command == "POST" and path.startswith("/classes/") and path.endswith("/mark"):
             class_id = self.path_id(path.removesuffix("/mark"), "/classes/")
             if class_id is not None:
-                return self.mark_figures(handler, user, class_id)
+                return self.with_prefix(self.mark_figures(handler, user, class_id), prefix)
         if handler.command == "GET" and path.startswith("/admin/classes/") and path.endswith("/edit"):
             class_id = self.path_id(path.removesuffix("/edit"), "/admin/classes/")
             if class_id is not None:
-                return self.require_admin(user, lambda: self.class_form(user, class_id))
+                return self.with_prefix(self.require_admin(user, lambda: self.class_form(user, class_id)), prefix)
         if handler.command == "POST" and path.startswith("/admin/classes/") and path.endswith("/edit"):
             class_id = self.path_id(path.removesuffix("/edit"), "/admin/classes/")
             if class_id is not None:
-                return self.require_admin(user, lambda: self.save_class(handler, class_id))
+                return self.with_prefix(self.require_admin(user, lambda: self.save_class(handler, class_id)), prefix)
         if handler.command == "GET" and path == "/admin/users":
-            return self.require_admin(user, lambda: self.users_page(user, consume_flash(query)))
+            return self.with_prefix(self.require_admin(user, lambda: self.users_page(user, consume_flash(query))), prefix)
         if handler.command == "GET" and path == "/admin/users/new":
-            return self.require_admin(user, lambda: self.user_form(user))
+            return self.with_prefix(self.require_admin(user, lambda: self.user_form(user)), prefix)
         if handler.command == "POST" and path == "/admin/users/new":
-            return self.require_admin(user, lambda: self.create_user(handler))
+            return self.with_prefix(self.require_admin(user, lambda: self.create_user(handler)), prefix)
         if handler.command == "POST" and path.startswith("/admin/users/") and path.endswith("/toggle"):
             user_id = self.path_id(path.removesuffix("/toggle"), "/admin/users/")
             if user_id is not None:
-                return self.require_admin(user, lambda: self.toggle_user(user, user_id))
+                return self.with_prefix(self.require_admin(user, lambda: self.toggle_user(user, user_id)), prefix)
         if handler.command == "POST" and path.startswith("/admin/users/") and path.endswith("/password"):
             user_id = self.path_id(path.removesuffix("/password"), "/admin/users/")
             if user_id is not None:
-                return self.require_admin(user, lambda: self.set_user_password(handler, user_id))
-        return self.page("Nicht gefunden", user, render_template("error.html", message="Diese Seite gibt es nicht."), status=404)
+                return self.with_prefix(self.require_admin(user, lambda: self.set_user_password(handler, user_id)), prefix)
+        return self.with_prefix(
+            self.page(
+                "Nicht gefunden",
+                user,
+                render_template("error.html", message="Diese Seite gibt es nicht."),
+                status=404,
+            ),
+            prefix,
+        )
+
+    def forwarded_prefix(self, handler: BaseHTTPRequestHandler) -> str:
+        prefix = handler.headers.get("X-Forwarded-Prefix", "").strip()
+        if not prefix or prefix == "/":
+            return ""
+        prefix = "/" + prefix.strip("/")
+        return prefix
+
+    def strip_prefix(self, path: str, prefix: str) -> str:
+        if prefix and (path == prefix or path.startswith(prefix + "/")):
+            stripped = path[len(prefix):]
+            return stripped or "/"
+        return path
+
+    def with_prefix(self, response: Response, prefix: str) -> Response:
+        if not prefix:
+            return response
+        status, headers, body = response
+        prefixed_headers: list[tuple[str, str]] = []
+        content_type = ""
+        for key, value in headers:
+            if key.lower() == "content-type":
+                content_type = value
+            if key.lower() == "location" and value.startswith("/"):
+                prefixed_headers.append((key, prefix + value))
+            else:
+                prefixed_headers.append((key, value))
+        if body and content_type.startswith("text/html"):
+            body = self.prefix_html_urls(body, prefix)
+        return status, prefixed_headers, body
+
+    def prefix_html_urls(self, body: bytes, prefix: str) -> bytes:
+        replacements = {
+            b'href="/': f'href="{prefix}/'.encode("utf-8"),
+            b'action="/': f'action="{prefix}/'.encode("utf-8"),
+            b'src="/': f'src="{prefix}/'.encode("utf-8"),
+        }
+        for needle, replacement in replacements.items():
+            body = body.replace(needle, replacement)
+        return body
 
     def static_file(self, path: str) -> Response:
         relative = path.removeprefix("/static/").replace("..", "")
