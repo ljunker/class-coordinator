@@ -1,6 +1,8 @@
 <nav>
-  <a href="/classes">Classes</a>
-  $admin_link
-  <a href="/profile">$display_name</a>
-  <form method="post" action="/logout"><button type="submit">Logout</button></form>
+  <a href="{{ url_for('classes_page') }}">Classes</a>
+  {% if user["role"] == "admin" %}
+    <a href="{{ url_for('users_page') }}">Accounts</a>
+  {% endif %}
+  <a href="{{ url_for('profile_page') }}">{{ user["display_name"] }}</a>
+  <form method="post" action="{{ url_for('logout') }}"><button type="submit">Logout</button></form>
 </nav>

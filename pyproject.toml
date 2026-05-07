@@ -7,4 +7,5 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dependencies = [
   "bcrypt>=4.1",
+  "flask>=3.0",
 ]

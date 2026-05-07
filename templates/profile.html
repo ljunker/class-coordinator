@@ -1,10 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
 <h1>Profil</h1>
-<form method="post" action="/profile" class="stack wide-form">
+<form method="post" action="{{ url_for('update_profile') }}" class="stack wide-form">
   <label>Benutzername
-    <input value="$username" disabled>
+    <input value="{{ user['username'] }}" disabled>
   </label>
   <label>Anzeigename
-    <input name="display_name" required value="$display_name">
+    <input name="display_name" required value="{{ user['display_name'] }}">
   </label>
   <fieldset class="stack">
     <legend>Passwort ändern</legend>
@@ -20,3 +22,4 @@
   </fieldset>
   <button type="submit">Profil speichern</button>
 </form>
+{% endblock %}

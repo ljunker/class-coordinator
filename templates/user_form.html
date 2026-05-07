@@ -1,5 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
 <h1>Account anlegen</h1>
-<form method="post" action="/admin/users/new" class="stack wide-form">
+<form method="post" action="{{ url_for('create_user') }}" class="stack wide-form">
   <label>Anzeigename <input name="display_name" required></label>
   <label>Benutzername <input name="username" required autocomplete="off"></label>
   <label>Passwort <input type="password" name="password" required autocomplete="new-password"></label>
@@ -11,3 +13,4 @@
   </label>
   <button type="submit">Account anlegen</button>
 </form>
+{% endblock %}

@@ -1,15 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
 <div class="toolbar">
   <div>
-    <h1>$name</h1>
-    <p>$program_name &middot; $location &middot; Start $starts_on</p>
+    <h1>{{ klass["name"] }}</h1>
+    <p>{{ klass["program_name"] }} &middot; {{ klass["location"] or "ohne Ort" }} &middot; Start {{ klass["starts_on"] or "offen" }}</p>
   </div>
-  $admin_action
+  {% if user and user["role"] == "admin" and can_write %}
+    <a class="button secondary" href="{{ url_for('edit_class_form', class_id=class_id) }}">Bearbeiten</a>
+  {% endif %}
 </div>
 <div class="filter-tabs">
-  $filter_tabs
+  <a class="filter-tab {% if active_view == 'all' %}active{% endif %}" href="{{ url_for('class_detail', class_id=class_id) }}">Alle</a>
+  <a class="filter-tab {% if active_view == 'review' %}active{% endif %}" href="{{ url_for('class_detail', class_id=class_id, view='review') }}">Zum wiederholen</a>
+  <a class="filter-tab {% if active_view == 'new' %}active{% endif %}" href="{{ url_for('class_detail', class_id=class_id, view='new') }}">Neue Figuren</a>
 </div>
-<form method="post" action="/classes/$id/mark" class="mark-form">
-  $mark_bar
+<form method="post" action="{{ url_for('mark_figures', class_id=class_id) }}" class="mark-form">
+  {% if can_write %}
+    <div class="mark-bar">
+      <label>Datum <input type="date" name="event_date" value="{{ today }}" required></label>
+      <label>Notiz <input name="notes" placeholder="optional"></label>
+      <button type="submit">Einträge speichern</button>
+    </div>
+  {% endif %}
   <table class="figures">
     <thead>
       <tr>
@@ -21,10 +33,49 @@
         <th>Review</th>
       </tr>
     </thead>
-    <tbody>$figure_rows</tbody>
+    <tbody>
+      {% for group in groups %}
+        <tr class="family-row {{ group.status_class }}">
+          <th colspan="6">{{ group.number }}. {{ group.family }}</th>
+        </tr>
+        {% for item in group.figures %}
+          {% set figure = item.figure %}
+          {% set status = item.status %}
+          <tr class="{{ item.status_class }}">
+            <td class="call-name">{{ figure["call_name"] }}</td>
+            <td>{{ status["first_taught"] if status and status["first_taught"] else "-" }}</td>
+            <td>{{ status["last_taught"] if status and status["last_taught"] else "-" }}</td>
+            <td>{{ status["last_reviewed"] if status and status["last_reviewed"] else "-" }}</td>
+            <td>
+              {% if can_write %}
+                <input type="checkbox" name="taught" value="{{ figure['id'] }}" aria-label="taught {{ figure['call_name'] }}">
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if can_write %}
+                <input type="checkbox" name="reviewed" value="{{ figure['id'] }}" aria-label="reviewed {{ figure['call_name'] }}">
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="6" class="empty-row">Keine passenden Figuren.</td></tr>
+      {% endfor %}
+    </tbody>
   </table>
 </form>
 <section>
   <h2>Letzte Einträge</h2>
-  <ul class="recent">$recent_items</ul>
+  <ul class="recent">
+    {% for row in recent %}
+      <li><strong>{{ row["event_date"] }}</strong> {{ row["call_name"] }}: {{ action_label(row["action"]) }} durch {{ row["display_name"] }}</li>
+    {% else %}
+      <li>Noch keine Einträge.</li>
+    {% endfor %}
+  </ul>
 </section>
+{% endblock %}

@@ -1,5 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
 <div class="toolbar">
   <h1>Classes</h1>
-  $admin_action
+  {% if user["role"] == "admin" %}
+    <a class="button" href="{{ url_for('new_class_form') }}">Class anlegen</a>
+  {% endif %}
 </div>
-$rows
+{% if classes %}
+  {% for klass in classes %}
+    <article class="list-row">
+      <div>
+        <h2><a href="{{ url_for('class_detail', class_id=klass['id']) }}">{{ klass["name"] }}</a></h2>
+        <p>
+          {{ klass["program_name"] }} &middot;
+          {{ klass["location"] or "ohne Ort" }} &middot;
+          Start {{ klass["starts_on"] or "offen" }}
+          {% if not klass["active"] %}<span class="pill muted">inaktiv</span>{% endif %}
+        </p>
+      </div>
+      <a class="button secondary" href="{{ url_for('class_detail', class_id=klass['id']) }}">Öffnen</a>
+    </article>
+  {% endfor %}
+{% else %}
+  <p>Noch keine Classes vorhanden.</p>
+{% endif %}
+{% endblock %}

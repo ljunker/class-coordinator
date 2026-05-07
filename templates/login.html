@@ -1,6 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
 <section class="auth-panel">
   <h1>Class Coordinator</h1>
-  <form method="post" action="/login" class="stack">
+  <form method="post" action="{{ url_for('login') }}" class="stack">
     <label>Benutzername
       <input name="username" autocomplete="username" required autofocus>
     </label>
@@ -10,3 +12,4 @@
     <button type="submit">Anmelden</button>
   </form>
 </section>
+{% endblock %}

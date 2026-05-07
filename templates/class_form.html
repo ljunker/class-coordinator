@@ -1,27 +1,45 @@
-<h1>$title</h1>
-<form method="post" action="$action" class="stack wide-form">
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<form method="post" action="{% if klass %}{{ url_for('update_class', class_id=class_id) }}{% else %}{{ url_for('create_class') }}{% endif %}" class="stack wide-form">
   <label>Name
-    <input name="name" required value="$name">
+    <input name="name" required value="{{ klass['name'] if klass else '' }}">
   </label>
   <label>Programm
-    <select name="program_id">$program_options</select>
+    <select name="program_id">
+      {% for program in programs %}
+        <option value="{{ program['id'] }}" {% if program["id"] == selected_program %}selected{% endif %}>
+          {{ program["name"] }} ({{ program["effective_date"] }})
+        </option>
+      {% endfor %}
+    </select>
   </label>
   <label>Ort
-    <input name="location" value="$location">
+    <input name="location" value="{{ klass['location'] if klass else '' }}">
   </label>
   <label>Startdatum
-    <input type="date" name="starts_on" value="$starts_on">
+    <input type="date" name="starts_on" value="{{ klass['starts_on'] if klass else '' }}">
   </label>
   <label>Notizen
-    <textarea name="notes" rows="4">$notes</textarea>
+    <textarea name="notes" rows="4">{{ klass["notes"] if klass else "" }}</textarea>
   </label>
   <label class="check-row">
-    <input type="checkbox" name="active" value="1" $active_checked>
+    <input type="checkbox" name="active" value="1" {% if not klass or klass["active"] %}checked{% endif %}>
     <span>aktiv</span>
   </label>
   <fieldset>
     <legend>Caller-Zugriff</legend>
-    $caller_checks
+    {% if callers %}
+      {% for caller in callers %}
+        <label class="check-row">
+          <input type="checkbox" name="caller_ids" value="{{ caller['id'] }}" {% if caller["id"] in assigned %}checked{% endif %}>
+          <span>{{ caller["display_name"] }} <small>@{{ caller["username"] }}</small></span>
+        </label>
+      {% endfor %}
+    {% else %}
+      <p>Lege zuerst Caller-Accounts an.</p>
+    {% endif %}
   </fieldset>
   <button type="submit">Speichern</button>
 </form>
+{% endblock %}

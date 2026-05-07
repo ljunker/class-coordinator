@@ -4,6 +4,8 @@ Web-App zum Verwalten von Square-Dance-Classes. Caller können pro Class
 ankreuzen, welche Figuren geteacht oder wiederholt wurden. Admins verwalten
 Classes, Accounts und Caller-Zugriffe.
 
+Die App ist in Python mit Flask gebaut und nutzt Jinja2 für Templates.
+
 ## Start
 
 ```bash

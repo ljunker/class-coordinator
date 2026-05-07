@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>$title - Class Coordinator</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <title>{{ title }} - Class Coordinator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header>$nav</header>
+  <header>{% if user %}{% include "partials/nav.html" %}{% endif %}</header>
   <main>
-    $flash
-    $body
+    {% for message in get_flashed_messages() %}
+      <p class="flash">{{ message }}</p>
+    {% endfor %}
+    {% block content %}{% endblock %}
   </main>
 </body>
 </html>

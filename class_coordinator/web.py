@@ -1,292 +1,110 @@
 from __future__ import annotations
 
-import json
 import secrets
 import sqlite3
-from http import HTTPStatus
-from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from functools import wraps
 from typing import Any, Callable
-from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .config import COOKIE_NAME, STATIC_DIR
+from flask import (
+    Flask,
+    Response,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+
+from .config import COOKIE_NAME, STATIC_DIR, TEMPLATE_DIR
 from .db import connect, init_db, now_iso, today_iso
 from .security import hash_password, verify_password
-from .templates import esc, render_page, render_template
 
 
-Response = tuple[int, list[tuple[str, str]], bytes]
+class PrefixMiddleware:
+    def __init__(self, app: Callable):
+        self.app = app
+
+    def __call__(self, environ: dict[str, Any], start_response: Callable):
+        prefix = environ.get("HTTP_X_FORWARDED_PREFIX", "").strip()
+        if prefix and prefix != "/":
+            prefix = "/" + prefix.strip("/")
+            path_info = environ.get("PATH_INFO", "")
+            if path_info == prefix or path_info.startswith(prefix + "/"):
+                environ["PATH_INFO"] = path_info[len(prefix):] or "/"
+            environ["SCRIPT_NAME"] = prefix
+        return self.app(environ, start_response)
 
 
-def redirect(location: str, headers: list[tuple[str, str]] | None = None) -> Response:
-    response_headers = [("Location", location)]
-    if headers:
-        response_headers.extend(headers)
-    return HTTPStatus.SEE_OTHER, response_headers, b""
+def create_app() -> Flask:
+    init_db()
+    app = Flask(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        template_folder=str(TEMPLATE_DIR),
+    )
+    app.secret_key = "class-coordinator-local-flash-key"
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app)
+    app.jinja_env.globals["action_label"] = action_label
 
+    @app.before_request
+    def load_user() -> None:
+        g.user = current_user()
 
-def parse_body(handler: BaseHTTPRequestHandler) -> dict[str, list[str]]:
-    length = int(handler.headers.get("Content-Length", "0"))
-    raw = handler.rfile.read(length).decode("utf-8") if length else ""
-    return parse_qs(raw, keep_blank_values=True)
+    @app.after_request
+    def add_cors_headers(response: Response) -> Response:
+        if request.path.endswith("/status.json") or request.method == "OPTIONS":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
 
+    @app.get("/")
+    @login_required
+    def index() -> Response:
+        return redirect(url_for("classes_page"))
 
-def single(form: dict[str, list[str]], key: str, default: str = "") -> str:
-    values = form.get(key)
-    return values[0].strip() if values else default
+    @app.get("/login")
+    def login_page() -> str:
+        return render_template("login.html", title="Login", user=None)
 
-
-def checked_values(form: dict[str, list[str]], key: str) -> set[int]:
-    result: set[int] = set()
-    for value in form.get(key, []):
-        try:
-            result.add(int(value))
-        except ValueError:
-            pass
-    return result
-
-
-def make_flash(message: str) -> str:
-    return quote(message)
-
-
-def consume_flash(query: dict[str, list[str]]) -> str:
-    values = query.get("flash", [])
-    return unquote(values[0]) if values else ""
-
-
-class App:
-    def current_user(self, handler: BaseHTTPRequestHandler) -> sqlite3.Row | None:
-        cookies = SimpleCookie()
-        cookies.load(handler.headers.get("Cookie", ""))
-        morsel = cookies.get(COOKIE_NAME)
-        if not morsel:
-            return None
-        with connect() as conn:
-            return conn.execute(
-                """
-                SELECT users.*
-                FROM sessions
-                JOIN users ON users.id = sessions.user_id
-                WHERE sessions.token = ? AND users.active = 1
-                """,
-                (morsel.value,),
-            ).fetchone()
-
-    def handle(self, handler: BaseHTTPRequestHandler) -> Response:
-        parsed = urlparse(handler.path)
-        prefix = self.forwarded_prefix(handler)
-        request_path = self.strip_prefix(parsed.path, prefix)
-        path = request_path.rstrip("/") or "/"
-        query = parse_qs(parsed.query)
-        user = self.current_user(handler)
-
-        if request_path.startswith("/static/"):
-            return self.with_prefix(self.static_file(request_path), prefix)
-        if handler.command == "GET" and path == "/login":
-            return self.with_prefix(self.login_page(consume_flash(query)), prefix)
-        if handler.command == "POST" and path == "/login":
-            return self.with_prefix(self.login(handler), prefix)
-        if handler.command == "POST" and path == "/logout":
-            return self.with_prefix(self.logout(handler), prefix)
-        if handler.command == "GET" and path.startswith("/classes/") and path.endswith("/status.json"):
-            class_id = self.path_id(path.removesuffix("/status.json"), "/classes/")
-            if class_id is not None:
-                return self.with_prefix(self.class_status_json(user, class_id), prefix)
-        if handler.command == "GET" and path.startswith("/classes/"):
-            class_id = self.path_id(path, "/classes/")
-            if class_id is not None:
-                return self.with_prefix(
-                    self.class_detail(
-                        user,
-                        class_id,
-                        consume_flash(query),
-                        view=single(query, "view", "all"),
-                    ),
-                    prefix,
-                )
-        if not user:
-            return self.with_prefix(redirect("/login"), prefix)
-        if handler.command == "GET" and path == "/":
-            return self.with_prefix(redirect("/classes"), prefix)
-        if handler.command == "GET" and path == "/classes":
-            return self.with_prefix(self.classes_page(user, consume_flash(query)), prefix)
-        if handler.command == "GET" and path == "/profile":
-            return self.with_prefix(self.profile_page(user, consume_flash(query)), prefix)
-        if handler.command == "POST" and path == "/profile":
-            return self.with_prefix(self.update_profile(handler, user), prefix)
-        if handler.command == "GET" and path == "/classes/new":
-            return self.with_prefix(self.require_admin(user, lambda: self.class_form(user, None)), prefix)
-        if handler.command == "POST" and path == "/classes/new":
-            return self.with_prefix(self.require_admin(user, lambda: self.save_class(handler, None)), prefix)
-        if handler.command == "POST" and path.startswith("/classes/") and path.endswith("/mark"):
-            class_id = self.path_id(path.removesuffix("/mark"), "/classes/")
-            if class_id is not None:
-                return self.with_prefix(self.mark_figures(handler, user, class_id), prefix)
-        if handler.command == "GET" and path.startswith("/admin/classes/") and path.endswith("/edit"):
-            class_id = self.path_id(path.removesuffix("/edit"), "/admin/classes/")
-            if class_id is not None:
-                return self.with_prefix(self.require_admin(user, lambda: self.class_form(user, class_id)), prefix)
-        if handler.command == "POST" and path.startswith("/admin/classes/") and path.endswith("/edit"):
-            class_id = self.path_id(path.removesuffix("/edit"), "/admin/classes/")
-            if class_id is not None:
-                return self.with_prefix(self.require_admin(user, lambda: self.save_class(handler, class_id)), prefix)
-        if handler.command == "GET" and path == "/admin/users":
-            return self.with_prefix(self.require_admin(user, lambda: self.users_page(user, consume_flash(query))), prefix)
-        if handler.command == "GET" and path == "/admin/users/new":
-            return self.with_prefix(self.require_admin(user, lambda: self.user_form(user)), prefix)
-        if handler.command == "POST" and path == "/admin/users/new":
-            return self.with_prefix(self.require_admin(user, lambda: self.create_user(handler)), prefix)
-        if handler.command == "POST" and path.startswith("/admin/users/") and path.endswith("/toggle"):
-            user_id = self.path_id(path.removesuffix("/toggle"), "/admin/users/")
-            if user_id is not None:
-                return self.with_prefix(self.require_admin(user, lambda: self.toggle_user(user, user_id)), prefix)
-        if handler.command == "POST" and path.startswith("/admin/users/") and path.endswith("/password"):
-            user_id = self.path_id(path.removesuffix("/password"), "/admin/users/")
-            if user_id is not None:
-                return self.with_prefix(self.require_admin(user, lambda: self.set_user_password(handler, user_id)), prefix)
-        return self.with_prefix(
-            self.page(
-                "Nicht gefunden",
-                user,
-                render_template("error.html", message="Diese Seite gibt es nicht."),
-                status=404,
-            ),
-            prefix,
-        )
-
-    def forwarded_prefix(self, handler: BaseHTTPRequestHandler) -> str:
-        prefix = handler.headers.get("X-Forwarded-Prefix", "").strip()
-        if not prefix or prefix == "/":
-            return ""
-        prefix = "/" + prefix.strip("/")
-        return prefix
-
-    def strip_prefix(self, path: str, prefix: str) -> str:
-        if prefix and (path == prefix or path.startswith(prefix + "/")):
-            stripped = path[len(prefix):]
-            return stripped or "/"
-        return path
-
-    def with_prefix(self, response: Response, prefix: str) -> Response:
-        if not prefix:
-            return response
-        status, headers, body = response
-        prefixed_headers: list[tuple[str, str]] = []
-        content_type = ""
-        for key, value in headers:
-            if key.lower() == "content-type":
-                content_type = value
-            if key.lower() == "location" and value.startswith("/"):
-                prefixed_headers.append((key, prefix + value))
-            else:
-                prefixed_headers.append((key, value))
-        if body and content_type.startswith("text/html"):
-            body = self.prefix_html_urls(body, prefix)
-        return status, prefixed_headers, body
-
-    def prefix_html_urls(self, body: bytes, prefix: str) -> bytes:
-        replacements = {
-            b'href="/': f'href="{prefix}/'.encode("utf-8"),
-            b'action="/': f'action="{prefix}/'.encode("utf-8"),
-            b'src="/': f'src="{prefix}/'.encode("utf-8"),
-        }
-        for needle, replacement in replacements.items():
-            body = body.replace(needle, replacement)
-        return body
-
-    def static_file(self, path: str) -> Response:
-        relative = path.removeprefix("/static/").replace("..", "")
-        file_path = STATIC_DIR / relative
-        if not file_path.is_file():
-            return 404, [("Content-Type", "text/plain; charset=utf-8")], b"not found"
-        content_type = "text/css; charset=utf-8" if file_path.suffix == ".css" else "application/octet-stream"
-        return 200, [("Content-Type", content_type)], file_path.read_bytes()
-
-    def path_id(self, path: str, prefix: str) -> int | None:
-        try:
-            return int(path.removeprefix(prefix))
-        except ValueError:
-            return None
-
-    def require_admin(self, user: sqlite3.Row, callback: Callable[[], Response]) -> Response:
-        if user["role"] != "admin":
-            body = render_template("error.html", message="Nur der Admin darf diese Aktion ausführen.")
-            return self.page("Keine Berechtigung", user, body, status=403)
-        return callback()
-
-    def login_page(self, flash: str = "") -> Response:
-        return self.page("Login", None, render_template("login.html"), flash=flash)
-
-    def login(self, handler: BaseHTTPRequestHandler) -> Response:
-        form = parse_body(handler)
-        username = single(form, "username")
-        password = single(form, "password")
+    @app.post("/login")
+    def login() -> Response:
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
         with connect() as conn:
             user = conn.execute(
                 "SELECT * FROM users WHERE username = ? AND active = 1", (username,)
             ).fetchone()
             if not user or not verify_password(password, user["password_hash"]):
-                return redirect("/login?flash=" + make_flash("Login fehlgeschlagen"))
+                flash("Login fehlgeschlagen")
+                return redirect(url_for("login_page"))
             token = secrets.token_urlsafe(32)
             conn.execute(
                 "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
                 (token, user["id"], now_iso()),
             )
-        return redirect(
-            "/classes",
-            [("Set-Cookie", f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax")],
-        )
+        response = redirect(url_for("classes_page"))
+        response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="Lax")
+        return response
 
-    def logout(self, handler: BaseHTTPRequestHandler) -> Response:
-        cookies = SimpleCookie()
-        cookies.load(handler.headers.get("Cookie", ""))
-        morsel = cookies.get(COOKIE_NAME)
-        if morsel:
+    @app.post("/logout")
+    def logout() -> Response:
+        token = request.cookies.get(COOKIE_NAME)
+        if token:
             with connect() as conn:
-                conn.execute("DELETE FROM sessions WHERE token = ?", (morsel.value,))
-        return redirect(
-            "/login?flash=" + make_flash("Abgemeldet"),
-            [("Set-Cookie", f"{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")],
-        )
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        response = redirect(url_for("login_page"))
+        response.delete_cookie(COOKIE_NAME)
+        flash("Abgemeldet")
+        return response
 
-    def profile_page(self, user: sqlite3.Row, flash: str = "") -> Response:
-        body = render_template(
-            "profile.html",
-            display_name=esc(user["display_name"]),
-            username=esc(user["username"]),
-        )
-        return self.page("Profil", user, body, flash=flash)
-
-    def update_profile(self, handler: BaseHTTPRequestHandler, user: sqlite3.Row) -> Response:
-        form = parse_body(handler)
-        display_name = single(form, "display_name")
-        current_password = single(form, "current_password")
-        new_password = single(form, "new_password")
-        new_password_confirm = single(form, "new_password_confirm")
-        if not display_name:
-            return redirect("/profile?flash=" + make_flash("Anzeigename ist Pflicht"))
-        if new_password:
-            if not verify_password(current_password, user["password_hash"]):
-                return redirect("/profile?flash=" + make_flash("Aktuelles Passwort stimmt nicht"))
-            if new_password != new_password_confirm:
-                return redirect("/profile?flash=" + make_flash("Neue Passwörter stimmen nicht überein"))
+    @app.get("/classes")
+    @login_required
+    def classes_page() -> str:
         with connect() as conn:
-            conn.execute(
-                "UPDATE users SET display_name = ? WHERE id = ?",
-                (display_name, user["id"]),
-            )
-            if new_password:
-                conn.execute(
-                    "UPDATE users SET password_hash = ? WHERE id = ?",
-                    (hash_password(new_password), user["id"]),
-                )
-        return redirect("/profile?flash=" + make_flash("Profil gespeichert"))
-
-    def classes_page(self, user: sqlite3.Row, flash: str = "") -> Response:
-        with connect() as conn:
-            if user["role"] == "admin":
+            if g.user["role"] == "admin":
                 classes = conn.execute(
                     """
                     SELECT classes.*, programs.name AS program_name
@@ -305,458 +123,99 @@ class App:
                     WHERE access.user_id = ? AND classes.active = 1
                     ORDER BY classes.starts_on, classes.name
                     """,
-                    (user["id"],),
+                    (g.user["id"],),
                 ).fetchall()
-        rows = []
-        for item in classes:
-            inactive = "" if item["active"] else '<span class="pill muted">inaktiv</span>'
-            rows.append(
-                render_template(
-                    "partials/class_row.html",
-                    id=item["id"],
-                    name=esc(item["name"]),
-                    program_name=esc(item["program_name"]),
-                    location=esc(item["location"]) or "ohne Ort",
-                    starts_on=esc(item["starts_on"]) or "offen",
-                    inactive=inactive,
-                )
-            )
-        body = render_template(
-            "classes.html",
-            admin_action='<a class="button" href="/classes/new">Class anlegen</a>'
-            if user["role"] == "admin"
-            else "",
-            rows="".join(rows) if rows else "<p>Noch keine Classes vorhanden.</p>",
-        )
-        return self.page("Classes", user, body, flash=flash)
+        return render_template("classes.html", title="Classes", user=g.user, classes=classes)
 
-    def class_form(self, user: sqlite3.Row, class_id: int | None) -> Response:
+    @app.get("/profile")
+    @login_required
+    def profile_page() -> str:
+        return render_template("profile.html", title="Profil", user=g.user)
+
+    @app.post("/profile")
+    @login_required
+    def update_profile() -> Response:
+        display_name = request.form.get("display_name", "").strip()
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        new_password_confirm = request.form.get("new_password_confirm", "")
+        if not display_name:
+            flash("Anzeigename ist Pflicht")
+            return redirect(url_for("profile_page"))
+        if new_password:
+            if not verify_password(current_password, g.user["password_hash"]):
+                flash("Aktuelles Passwort stimmt nicht")
+                return redirect(url_for("profile_page"))
+            if new_password != new_password_confirm:
+                flash("Neue Passwörter stimmen nicht überein")
+                return redirect(url_for("profile_page"))
         with connect() as conn:
-            programs = conn.execute("SELECT * FROM programs ORDER BY name").fetchall()
-            callers = conn.execute(
-                "SELECT * FROM users WHERE role = 'caller' ORDER BY display_name"
-            ).fetchall()
-            klass = None
-            assigned: set[int] = set()
-            if class_id:
-                klass = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
-                assigned = {
-                    row["user_id"]
-                    for row in conn.execute(
-                        "SELECT user_id FROM caller_class_access WHERE class_id = ?",
-                        (class_id,),
-                    )
-                }
-        if class_id and not klass:
-            return self.page("Nicht gefunden", user, render_template("error.html", message="Class nicht gefunden."), status=404)
-
-        selected_program = klass["program_id"] if klass else (programs[0]["id"] if programs else "")
-        program_options = "".join(
-            render_template(
-                "partials/option.html",
-                value=program["id"],
-                selected="selected" if program["id"] == selected_program else "",
-                label=f"{esc(program['name'])} ({esc(program['effective_date'])})",
+            conn.execute(
+                "UPDATE users SET display_name = ? WHERE id = ?",
+                (display_name, g.user["id"]),
             )
-            for program in programs
-        )
-        caller_checks = "".join(
-            render_template(
-                "partials/caller_checkbox.html",
-                id=caller["id"],
-                checked="checked" if caller["id"] in assigned else "",
-                display_name=esc(caller["display_name"]),
-                username=esc(caller["username"]),
-            )
-            for caller in callers
-        )
-        title = "Class bearbeiten" if klass else "Class anlegen"
-        body = render_template(
-            "class_form.html",
-            title=title,
-            action=f"/admin/classes/{class_id}/edit" if klass else "/classes/new",
-            name=esc(klass["name"] if klass else ""),
-            program_options=program_options,
-            location=esc(klass["location"] if klass else ""),
-            starts_on=esc(klass["starts_on"] if klass else ""),
-            notes=esc(klass["notes"] if klass else ""),
-            active_checked="checked" if not klass or klass["active"] else "",
-            caller_checks=caller_checks or "<p>Lege zuerst Caller-Accounts an.</p>",
-        )
-        return self.page(title, user, body)
-
-    def save_class(self, handler: BaseHTTPRequestHandler, class_id: int | None) -> Response:
-        form = parse_body(handler)
-        name = single(form, "name")
-        program_id = int(single(form, "program_id", "0") or "0")
-        location = single(form, "location")
-        starts_on = single(form, "starts_on")
-        notes = single(form, "notes")
-        active = 1 if "active" in form else 0
-        caller_ids = checked_values(form, "caller_ids")
-        if not name or not program_id:
-            return redirect("/classes?flash=" + make_flash("Name und Programm sind Pflicht"))
-        with connect() as conn:
-            if class_id:
+            if new_password:
                 conn.execute(
-                    """
-                    UPDATE classes
-                    SET name = ?, program_id = ?, location = ?, starts_on = ?,
-                        notes = ?, active = ?
-                    WHERE id = ?
-                    """,
-                    (name, program_id, location, starts_on, notes, active, class_id),
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (hash_password(new_password), g.user["id"]),
                 )
-                target_id = class_id
-                conn.execute("DELETE FROM caller_class_access WHERE class_id = ?", (target_id,))
-            else:
-                cur = conn.execute(
-                    """
-                    INSERT INTO classes
-                        (program_id, name, location, starts_on, notes, active, created_at)
-                    VALUES (?, ?, ?, ?, ?, 1, ?)
-                    """,
-                    (program_id, name, location, starts_on, notes, now_iso()),
-                )
-                target_id = cur.lastrowid
-            for caller_id in caller_ids:
-                conn.execute(
-                    "INSERT OR IGNORE INTO caller_class_access (user_id, class_id) VALUES (?, ?)",
-                    (caller_id, target_id),
-                )
-        return redirect(f"/classes/{target_id}?flash=" + make_flash("Class gespeichert"))
+        flash("Profil gespeichert")
+        return redirect(url_for("profile_page"))
 
-    def class_detail(
-        self,
-        user: sqlite3.Row | None,
-        class_id: int,
-        flash: str = "",
-        view: str = "all",
-    ) -> Response:
+    @app.get("/classes/new")
+    @admin_required
+    def new_class_form() -> str:
+        return render_class_form(None)
+
+    @app.post("/classes/new")
+    @admin_required
+    def create_class() -> Response:
+        class_id = save_class(None)
+        if class_id is None:
+            flash("Name und Programm sind Pflicht")
+            return redirect(url_for("classes_page"))
+        flash("Class gespeichert")
+        return redirect(url_for("class_detail", class_id=class_id))
+
+    @app.get("/admin/classes/<int:class_id>/edit")
+    @admin_required
+    def edit_class_form(class_id: int) -> str | tuple[str, int]:
+        return render_class_form(class_id)
+
+    @app.post("/admin/classes/<int:class_id>/edit")
+    @admin_required
+    def update_class(class_id: int) -> Response:
+        saved_id = save_class(class_id)
+        if saved_id is None:
+            flash("Name und Programm sind Pflicht")
+            return redirect(url_for("classes_page"))
+        flash("Class gespeichert")
+        return redirect(url_for("class_detail", class_id=saved_id))
+
+    @app.get("/classes/<int:class_id>")
+    def class_detail(class_id: int) -> str | tuple[str, int]:
+        data = class_detail_context(g.user, class_id, request.args.get("view", "all"))
+        if data is None:
+            return error_page("Class nicht gefunden.", 404)
+        return render_template("class_detail.html", **data)
+
+    @app.post("/classes/<int:class_id>/mark")
+    @login_required
+    def mark_figures(class_id: int) -> Response | tuple[str, int]:
         with connect() as conn:
-            write_klass = self.visible_class(conn, user, class_id) if user else None
-            klass = write_klass or self.public_class(conn, class_id)
+            klass = visible_class(conn, g.user, class_id)
             if not klass:
-                body = render_template("error.html", message="Class nicht gefunden.")
-                return self.page("Nicht gefunden", user, body, status=404)
-            can_write = bool(write_klass)
-            figures = conn.execute(
-                "SELECT * FROM figures WHERE program_id = ? ORDER BY sort_order",
-                (klass["program_id"],),
-            ).fetchall()
-            status = {
-                row["figure_id"]: row
-                for row in conn.execute(
-                    """
-                    SELECT
-                        figure_id,
-                        MIN(CASE WHEN action = 'taught' THEN event_date END) AS first_taught,
-                        MAX(CASE WHEN action = 'taught' THEN event_date END) AS last_taught,
-                        MAX(CASE WHEN action = 'reviewed' THEN event_date END) AS last_reviewed
-                    FROM figure_events
-                    WHERE class_id = ?
-                    GROUP BY figure_id
-                    """,
-                    (class_id,),
-                )
-            }
-            recent = conn.execute(
-                """
-                SELECT figure_events.*, figures.call_name, users.display_name
-                FROM figure_events
-                JOIN figures ON figures.id = figure_events.figure_id
-                JOIN users ON users.id = figure_events.caller_id
-                WHERE figure_events.class_id = ?
-                ORDER BY figure_events.event_date DESC, figure_events.id DESC
-                LIMIT 12
-                """,
-                (class_id,),
-            ).fetchall()
-
-        active_view = view if view in {"all", "review", "new"} else "all"
-        figures = self.filter_figures(figures, status, active_view)
-        figure_rows = []
-        current_family = None
-        for figure in figures:
-            if figure["family"] != current_family:
-                current_family = figure["family"]
-                figure_rows.append(
-                    render_template(
-                        "partials/family_row.html",
-                        number=esc(figure["number"]),
-                        family=esc(figure["family"]),
-                    )
-                )
-            item = status.get(figure["id"])
-            figure_rows.append(
-                render_template(
-                    "partials/figure_row.html",
-                    id=figure["id"],
-                    call_name=esc(figure["call_name"]),
-                    first_taught=esc(item["first_taught"] if item else "") or "-",
-                    last_taught=esc(item["last_taught"] if item else "") or "-",
-                    last_reviewed=esc(item["last_reviewed"] if item else "") or "-",
-                    status_class=self.figure_row_status_class(item),
-                    taught_control=(
-                        f'<input type="checkbox" name="taught" value="{figure["id"]}" aria-label="taught {esc(figure["call_name"])}">'
-                        if can_write
-                        else "-"
-                    ),
-                    reviewed_control=(
-                        f'<input type="checkbox" name="reviewed" value="{figure["id"]}" aria-label="reviewed {esc(figure["call_name"])}">'
-                        if can_write
-                        else "-"
-                    ),
-                )
-            )
-        if not figure_rows:
-            figure_rows.append(
-                '<tr><td colspan="6" class="empty-row">Keine passenden Figuren.</td></tr>'
-            )
-        figure_rows = self.apply_family_row_status(figure_rows)
-        recent_items = "".join(
-            render_template(
-                "partials/recent_item.html",
-                event_date=esc(row["event_date"]),
-                call_name=esc(row["call_name"]),
-                action=esc(self.action_label(row["action"])),
-                display_name=esc(row["display_name"]),
-            )
-            for row in recent
-        )
-        body = render_template(
-            "class_detail.html",
-            id=class_id,
-            name=esc(klass["name"]),
-            program_name=esc(klass["program_name"]),
-            location=esc(klass["location"]) or "ohne Ort",
-            starts_on=esc(klass["starts_on"]) or "offen",
-            admin_action=f'<a class="button secondary" href="/admin/classes/{class_id}/edit">Bearbeiten</a>'
-            if user and user["role"] == "admin" and can_write
-            else "",
-            filter_tabs=self.filter_tabs(class_id, active_view),
-            mark_bar=render_template("partials/mark_bar.html", today=today_iso())
-            if can_write
-            else "",
-            today=today_iso(),
-            figure_rows="".join(figure_rows),
-            recent_items=recent_items or "<li>Noch keine Einträge.</li>",
-        )
-        return self.page(klass["name"], user, body, flash=flash)
-
-    def figure_row_status_class(self, status: sqlite3.Row | None) -> str:
-        if not status or not status["first_taught"]:
-            return ""
-        if self.needs_review(status):
-            return "needs-review"
-        if status["last_reviewed"]:
-            return "reviewed"
-        return ""
-
-    def apply_family_row_status(self, rows: list[str]) -> list[str]:
-        result: list[str] = []
-        family_index: int | None = None
-        family_statuses: list[str] = []
-
-        def flush_family() -> None:
-            if family_index is None:
-                return
-            status_class = self.family_status_class(family_statuses)
-            result[family_index] = result[family_index].replace(
-                'class="family-row"',
-                f'class="family-row {status_class}"' if status_class else 'class="family-row"',
-                1,
-            )
-
-        for row in rows:
-            if 'class="family-row"' in row:
-                flush_family()
-                family_index = len(result)
-                family_statuses = []
-            elif 'class="needs-review"' in row:
-                family_statuses.append("needs-review")
-            elif 'class="reviewed"' in row:
-                family_statuses.append("reviewed")
-            elif "<td" in row:
-                family_statuses.append("")
-            result.append(row)
-        flush_family()
-        return result
-
-    def family_status_class(self, statuses: list[str]) -> str:
-        if not statuses:
-            return ""
-        if all(status == "reviewed" for status in statuses):
-            return "reviewed"
-        if any(status == "needs-review" for status in statuses):
-            return "needs-review"
-        return ""
-
-    def filter_figures(
-        self,
-        figures: list[sqlite3.Row],
-        status: dict[int, sqlite3.Row],
-        view: str,
-    ) -> list[sqlite3.Row]:
-        if view == "new":
-            return [
-                figure
-                for figure in figures
-                if not (status.get(figure["id"]) and status[figure["id"]]["first_taught"])
-            ][:10]
-        if view == "review":
-            return sorted(
-                [
-                    figure
-                    for figure in figures
-                    if self.needs_review(status.get(figure["id"]))
-                ],
-                key=lambda figure: status[figure["id"]]["last_taught"] or "",
-                reverse=True,
-            )
-        return figures
-
-    def needs_review(self, status: sqlite3.Row | None) -> bool:
-        if not status or not status["first_taught"]:
-            return False
-        if not status["last_reviewed"]:
-            return True
-        return (status["last_taught"] or "") > status["last_reviewed"]
-
-    def filter_tabs(self, class_id: int, active_view: str) -> str:
-        filters = [
-            ("all", "Alle", f"/classes/{class_id}"),
-            ("review", "Zum wiederholen", f"/classes/{class_id}?view=review"),
-            ("new", "Neue Figuren", f"/classes/{class_id}?view=new"),
-        ]
-        return "".join(
-            render_template(
-                "partials/filter_tab.html",
-                href=href,
-                label=label,
-                active="active" if key == active_view else "",
-            )
-            for key, label, href in filters
-        )
-
-    def class_status_json(self, user: sqlite3.Row | None, class_id: int) -> Response:
-        with connect() as conn:
-            klass = (
-                self.visible_class(conn, user, class_id)
-                if user
-                else self.public_class(conn, class_id)
-            )
-            if not klass:
-                payload = {"error": "class not found"}
-                return self.json_response(payload, status=404)
-            figures = conn.execute(
-                "SELECT * FROM figures WHERE program_id = ? ORDER BY sort_order",
-                (klass["program_id"],),
-            ).fetchall()
-            status = {
-                row["figure_id"]: row
-                for row in conn.execute(
-                    """
-                    SELECT
-                        figure_id,
-                        MIN(CASE WHEN action = 'taught' THEN event_date END) AS first_taught,
-                        MAX(CASE WHEN action = 'taught' THEN event_date END) AS last_taught,
-                        MAX(CASE WHEN action = 'reviewed' THEN event_date END) AS last_reviewed
-                    FROM figure_events
-                    WHERE class_id = ?
-                    GROUP BY figure_id
-                    """,
-                    (class_id,),
-                )
-            }
-
-        payload = {
-            "class": {
-                "id": klass["id"],
-                "name": klass["name"],
-                "location": klass["location"],
-                "starts_on": klass["starts_on"],
-                "active": bool(klass["active"]),
-            },
-            "program": {
-                "id": klass["program_id"],
-                "name": klass["program_name"],
-            },
-            "figures": [
-                self.figure_status_payload(figure, status.get(figure["id"]))
-                for figure in figures
-            ],
-        }
-        return self.json_response(payload)
-
-    def public_class(self, conn: sqlite3.Connection, class_id: int):
-        return conn.execute(
-            """
-            SELECT classes.*, programs.name AS program_name
-            FROM classes
-            JOIN programs ON programs.id = classes.program_id
-            WHERE classes.id = ? AND classes.active = 1
-            """,
-            (class_id,),
-        ).fetchone()
-
-    def figure_status_payload(
-        self, figure: sqlite3.Row, status: sqlite3.Row | None
-    ) -> dict[str, Any]:
-        first_taught = status["first_taught"] if status else None
-        last_taught = status["last_taught"] if status else None
-        last_reviewed = status["last_reviewed"] if status else None
-        return {
-            "id": figure["id"],
-            "number": figure["number"],
-            "family": figure["family"],
-            "call_name": figure["call_name"],
-            "teached": bool(first_taught),
-            "reviewed": bool(last_reviewed),
-            "first_taught": first_taught,
-            "last_taught": last_taught,
-            "last_reviewed": last_reviewed,
-        }
-
-    def visible_class(self, conn: sqlite3.Connection, user: sqlite3.Row, class_id: int):
-        if user["role"] == "admin":
-            return conn.execute(
-                """
-                SELECT classes.*, programs.name AS program_name
-                FROM classes
-                JOIN programs ON programs.id = classes.program_id
-                WHERE classes.id = ?
-                """,
-                (class_id,),
-            ).fetchone()
-        return conn.execute(
-            """
-            SELECT classes.*, programs.name AS program_name
-            FROM classes
-            JOIN programs ON programs.id = classes.program_id
-            JOIN caller_class_access access ON access.class_id = classes.id
-            WHERE classes.id = ? AND access.user_id = ? AND classes.active = 1
-            """,
-            (class_id, user["id"]),
-        ).fetchone()
-
-    def mark_figures(self, handler: BaseHTTPRequestHandler, user: sqlite3.Row, class_id: int) -> Response:
-        form = parse_body(handler)
-        taught_ids = checked_values(form, "taught")
-        reviewed_ids = checked_values(form, "reviewed")
-        event_date = single(form, "event_date", today_iso())
-        notes = single(form, "notes")
-        with connect() as conn:
-            klass = self.visible_class(conn, user, class_id)
-            if not klass:
-                body = render_template("error.html", message="Class nicht gefunden.")
-                return self.page("Nicht gefunden", user, body, status=404)
+                return error_page("Class nicht gefunden.", 404)
             valid_ids = {
                 row["id"]
                 for row in conn.execute(
                     "SELECT id FROM figures WHERE program_id = ?", (klass["program_id"],)
                 )
             }
+            taught_ids = checked_values("taught")
+            reviewed_ids = checked_values("reviewed")
+            event_date = request.form.get("event_date", today_iso()).strip()
+            notes = request.form.get("notes", "").strip()
             for action, figure_ids in (("taught", taught_ids), ("reviewed", reviewed_ids)):
                 for figure_id in sorted(figure_ids & valid_ids):
                     conn.execute(
@@ -765,43 +224,36 @@ class App:
                             (class_id, figure_id, action, event_date, caller_id, notes, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (class_id, figure_id, action, event_date, user["id"], notes, now_iso()),
+                        (class_id, figure_id, action, event_date, g.user["id"], notes, now_iso()),
                     )
-        return redirect(f"/classes/{class_id}?flash=" + make_flash("Einträge gespeichert"))
+        flash("Einträge gespeichert")
+        return redirect(url_for("class_detail", class_id=class_id))
 
-    def users_page(self, user: sqlite3.Row, flash: str = "") -> Response:
+    @app.get("/classes/<int:class_id>/status.json")
+    def class_status_json(class_id: int) -> Response:
+        payload = class_status_payload(g.user, class_id)
+        status = 200 if "error" not in payload else 404
+        return jsonify(payload), status
+
+    @app.get("/admin/users")
+    @admin_required
+    def users_page() -> str:
         with connect() as conn:
             users = conn.execute("SELECT * FROM users ORDER BY role, display_name").fetchall()
-        rows = "".join(
-            render_template(
-                "partials/user_row.html",
-                id=row["id"],
-                display_name=esc(row["display_name"]),
-                username=esc(row["username"]),
-                role=esc(row["role"]),
-                active="aktiv" if row["active"] else "inaktiv",
-                password_action=render_template("partials/password_reset.html", id=row["id"]),
-                toggle=""
-                if row["id"] == user["id"]
-                else render_template(
-                    "partials/user_toggle.html",
-                    id=row["id"],
-                    label="Deaktivieren" if row["active"] else "Aktivieren",
-                ),
-            )
-            for row in users
-        )
-        return self.page("Accounts", user, render_template("users.html", rows=rows), flash=flash)
+        return render_template("users.html", title="Accounts", user=g.user, users=users)
 
-    def user_form(self, user: sqlite3.Row) -> Response:
-        return self.page("Account anlegen", user, render_template("user_form.html"))
+    @app.get("/admin/users/new")
+    @admin_required
+    def user_form() -> str:
+        return render_template("user_form.html", title="Account anlegen", user=g.user)
 
-    def create_user(self, handler: BaseHTTPRequestHandler) -> Response:
-        form = parse_body(handler)
-        display_name = single(form, "display_name")
-        username = single(form, "username")
-        password = single(form, "password")
-        role = single(form, "role", "caller")
+    @app.post("/admin/users/new")
+    @admin_required
+    def create_user() -> Response:
+        display_name = request.form.get("display_name", "").strip()
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        role = request.form.get("role", "caller")
         if role not in {"admin", "caller"}:
             role = "caller"
         try:
@@ -815,93 +267,439 @@ class App:
                     (username, display_name, hash_password(password), role, now_iso()),
                 )
         except sqlite3.IntegrityError:
-            return redirect("/admin/users?flash=" + make_flash("Benutzername existiert schon"))
-        return redirect("/admin/users?flash=" + make_flash("Account angelegt"))
+            flash("Benutzername existiert schon")
+            return redirect(url_for("users_page"))
+        flash("Account angelegt")
+        return redirect(url_for("users_page"))
 
-    def set_user_password(self, handler: BaseHTTPRequestHandler, user_id: int) -> Response:
-        form = parse_body(handler)
-        password = single(form, "password")
+    @app.post("/admin/users/<int:user_id>/password")
+    @admin_required
+    def set_user_password(user_id: int) -> Response:
+        password = request.form.get("password", "")
         if not password:
-            return redirect("/admin/users?flash=" + make_flash("Passwort darf nicht leer sein"))
+            flash("Passwort darf nicht leer sein")
+            return redirect(url_for("users_page"))
         with connect() as conn:
             user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
             if not user:
-                return redirect("/admin/users?flash=" + make_flash("Account nicht gefunden"))
+                flash("Account nicht gefunden")
+                return redirect(url_for("users_page"))
             conn.execute(
                 "UPDATE users SET password_hash = ? WHERE id = ?",
                 (hash_password(password), user_id),
             )
             conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        return redirect("/admin/users?flash=" + make_flash("Passwort gesetzt"))
+        flash("Passwort gesetzt")
+        return redirect(url_for("users_page"))
 
-    def toggle_user(self, current_user: sqlite3.Row, user_id: int) -> Response:
-        if current_user["id"] == user_id:
-            return redirect("/admin/users?flash=" + make_flash("Eigenen Account nicht deaktiviert"))
+    @app.post("/admin/users/<int:user_id>/toggle")
+    @admin_required
+    def toggle_user(user_id: int) -> Response:
+        if g.user["id"] == user_id:
+            flash("Eigenen Account nicht deaktiviert")
+            return redirect(url_for("users_page"))
         with connect() as conn:
             conn.execute(
                 "UPDATE users SET active = CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id = ?",
                 (user_id,),
             )
             conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        return redirect("/admin/users?flash=" + make_flash("Account aktualisiert"))
+        flash("Account aktualisiert")
+        return redirect(url_for("users_page"))
 
-    def action_label(self, action: str) -> str:
-        return "geteacht" if action == "taught" else "wiederholt"
+    @app.errorhandler(404)
+    def not_found(_: Exception) -> tuple[str, int]:
+        return error_page("Diese Seite gibt es nicht.", 404)
 
-    def page(
-        self,
-        title: str,
-        user: sqlite3.Row | None,
-        body: str,
-        *,
-        flash: str = "",
-        status: int = 200,
-    ) -> Response:
-        return status, [("Content-Type", "text/html; charset=utf-8")], render_page(title, user, body, flash)
+    def error_page(message: str, status: int) -> tuple[str, int]:
+        return (
+            render_template("error.html", title="Nicht gefunden", user=g.user, message=message),
+            status,
+        )
 
-    def json_response(self, payload: Any, status: int = 200) -> Response:
-        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-        return status, [
-            ("Content-Type", "application/json; charset=utf-8"),
-            ("Access-Control-Allow-Origin", "*"),
-        ], body
+    return app
 
 
-class Handler(BaseHTTPRequestHandler):
-    app = App()
-
-    def do_GET(self) -> None:
-        self.respond(self.app.handle(self))
-
-    def do_POST(self) -> None:
-        self.respond(self.app.handle(self))
-
-    def do_OPTIONS(self) -> None:
-        self.respond((
-            204,
-            [
-                ("Access-Control-Allow-Origin", "*"),
-                ("Access-Control-Allow-Methods", "GET, OPTIONS"),
-                ("Access-Control-Allow-Headers", "Content-Type"),
-            ],
-            b"",
-        ))
-
-    def respond(self, response: Response) -> None:
-        status, headers, body = response
-        self.send_response(status)
-        for key, value in headers:
-            self.send_header(key, value)
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
-
-    def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"{self.address_string()} - {fmt % args}")
+def current_user() -> sqlite3.Row | None:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    with connect() as conn:
+        return conn.execute(
+            """
+            SELECT users.*
+            FROM sessions
+            JOIN users ON users.id = sessions.user_id
+            WHERE sessions.token = ? AND users.active = 1
+            """,
+            (token,),
+        ).fetchone()
 
 
-def run(host: str = "127.0.0.1", port: int = 8765) -> None:
-    init_db()
-    server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Class Coordinator running at http://{host}:{port}")
-    server.serve_forever()
+def login_required(fn: Callable) -> Callable:
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any):
+        if not g.user:
+            return redirect(url_for("login_page"))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_required(fn: Callable) -> Callable:
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any):
+        if not g.user:
+            return redirect(url_for("login_page"))
+        if g.user["role"] != "admin":
+            return (
+                render_template(
+                    "error.html",
+                    title="Keine Berechtigung",
+                    user=g.user,
+                    message="Nur der Admin darf diese Aktion ausführen.",
+                ),
+                403,
+            )
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def checked_values(key: str) -> set[int]:
+    result: set[int] = set()
+    for value in request.form.getlist(key):
+        try:
+            result.add(int(value))
+        except ValueError:
+            pass
+    return result
+
+
+def render_class_form(class_id: int | None) -> str | tuple[str, int]:
+    with connect() as conn:
+        programs = conn.execute("SELECT * FROM programs ORDER BY name").fetchall()
+        callers = conn.execute(
+            "SELECT * FROM users WHERE role = 'caller' ORDER BY display_name"
+        ).fetchall()
+        klass = None
+        assigned: set[int] = set()
+        if class_id:
+            klass = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
+            assigned = {
+                row["user_id"]
+                for row in conn.execute(
+                    "SELECT user_id FROM caller_class_access WHERE class_id = ?",
+                    (class_id,),
+                )
+            }
+    if class_id and not klass:
+        return (
+            render_template(
+                "error.html",
+                title="Nicht gefunden",
+                user=g.user,
+                message="Class nicht gefunden.",
+            ),
+            404,
+        )
+    title = "Class bearbeiten" if klass else "Class anlegen"
+    selected_program = klass["program_id"] if klass else (programs[0]["id"] if programs else "")
+    return render_template(
+        "class_form.html",
+        title=title,
+        user=g.user,
+        klass=klass,
+        class_id=class_id,
+        programs=programs,
+        selected_program=selected_program,
+        callers=callers,
+        assigned=assigned,
+    )
+
+
+def save_class(class_id: int | None) -> int | None:
+    name = request.form.get("name", "").strip()
+    program_id = int(request.form.get("program_id", "0") or "0")
+    location = request.form.get("location", "").strip()
+    starts_on = request.form.get("starts_on", "").strip()
+    notes = request.form.get("notes", "").strip()
+    active = 1 if "active" in request.form else 0
+    caller_ids = checked_values("caller_ids")
+    if not name or not program_id:
+        return None
+    with connect() as conn:
+        if class_id:
+            conn.execute(
+                """
+                UPDATE classes
+                SET name = ?, program_id = ?, location = ?, starts_on = ?,
+                    notes = ?, active = ?
+                WHERE id = ?
+                """,
+                (name, program_id, location, starts_on, notes, active, class_id),
+            )
+            target_id = class_id
+            conn.execute("DELETE FROM caller_class_access WHERE class_id = ?", (target_id,))
+        else:
+            cur = conn.execute(
+                """
+                INSERT INTO classes
+                    (program_id, name, location, starts_on, notes, active, created_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
+                """,
+                (program_id, name, location, starts_on, notes, now_iso()),
+            )
+            target_id = cur.lastrowid
+        for caller_id in caller_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO caller_class_access (user_id, class_id) VALUES (?, ?)",
+                (caller_id, target_id),
+            )
+    return target_id
+
+
+def class_detail_context(
+    user: sqlite3.Row | None,
+    class_id: int,
+    view: str,
+) -> dict[str, Any] | None:
+    with connect() as conn:
+        write_klass = visible_class(conn, user, class_id) if user else None
+        klass = write_klass or public_class(conn, class_id)
+        if not klass:
+            return None
+        can_write = bool(write_klass)
+        figures = conn.execute(
+            "SELECT * FROM figures WHERE program_id = ? ORDER BY sort_order",
+            (klass["program_id"],),
+        ).fetchall()
+        status = figure_status(conn, class_id)
+        recent = conn.execute(
+            """
+            SELECT figure_events.*, figures.call_name, users.display_name
+            FROM figure_events
+            JOIN figures ON figures.id = figure_events.figure_id
+            JOIN users ON users.id = figure_events.caller_id
+            WHERE figure_events.class_id = ?
+            ORDER BY figure_events.event_date DESC, figure_events.id DESC
+            LIMIT 12
+            """,
+            (class_id,),
+        ).fetchall()
+
+    active_view = view if view in {"all", "review", "new"} else "all"
+    visible_figures = filter_figures(figures, status, active_view)
+    family_statuses = family_statuses_for(figures, status)
+    return {
+        "title": klass["name"],
+        "user": user,
+        "klass": klass,
+        "class_id": class_id,
+        "can_write": can_write,
+        "today": today_iso(),
+        "groups": group_figures(visible_figures, status, family_statuses, can_write),
+        "recent": recent,
+        "active_view": active_view,
+    }
+
+
+def class_status_payload(user: sqlite3.Row | None, class_id: int) -> dict[str, Any]:
+    with connect() as conn:
+        klass = visible_class(conn, user, class_id) if user else public_class(conn, class_id)
+        if not klass:
+            return {"error": "class not found"}
+        figures = conn.execute(
+            "SELECT * FROM figures WHERE program_id = ? ORDER BY sort_order",
+            (klass["program_id"],),
+        ).fetchall()
+        status = figure_status(conn, class_id)
+    return {
+        "class": {
+            "id": klass["id"],
+            "name": klass["name"],
+            "location": klass["location"],
+            "starts_on": klass["starts_on"],
+            "active": bool(klass["active"]),
+        },
+        "program": {
+            "id": klass["program_id"],
+            "name": klass["program_name"],
+        },
+        "figures": [figure_status_payload(figure, status.get(figure["id"])) for figure in figures],
+    }
+
+
+def figure_status(conn: sqlite3.Connection, class_id: int) -> dict[int, sqlite3.Row]:
+    return {
+        row["figure_id"]: row
+        for row in conn.execute(
+            """
+            SELECT
+                figure_id,
+                MIN(CASE WHEN action = 'taught' THEN event_date END) AS first_taught,
+                MAX(CASE WHEN action = 'taught' THEN event_date END) AS last_taught,
+                MAX(CASE WHEN action = 'reviewed' THEN event_date END) AS last_reviewed
+            FROM figure_events
+            WHERE class_id = ?
+            GROUP BY figure_id
+            """,
+            (class_id,),
+        )
+    }
+
+
+def group_figures(
+    figures: list[sqlite3.Row],
+    status: dict[int, sqlite3.Row],
+    family_statuses: dict[str, str],
+    can_write: bool,
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    by_family: dict[str, dict[str, Any]] = {}
+    for figure in figures:
+        family = figure["family"]
+        if family not in by_family:
+            group = {
+                "number": figure["number"],
+                "family": family,
+                "status_class": family_statuses.get(family, ""),
+                "figures": [],
+            }
+            by_family[family] = group
+            groups.append(group)
+        row_status = status.get(figure["id"])
+        by_family[family]["figures"].append(
+            {
+                "figure": figure,
+                "status": row_status,
+                "status_class": figure_row_status_class(row_status),
+                "can_write": can_write,
+            }
+        )
+    return groups
+
+
+def family_statuses_for(
+    figures: list[sqlite3.Row],
+    status: dict[int, sqlite3.Row],
+) -> dict[str, str]:
+    statuses: dict[str, list[str]] = {}
+    for figure in figures:
+        statuses.setdefault(figure["family"], []).append(
+            figure_row_status_class(status.get(figure["id"]))
+        )
+    return {family: family_status_class(values) for family, values in statuses.items()}
+
+
+def family_status_class(statuses: list[str]) -> str:
+    if not statuses:
+        return ""
+    if all(status == "reviewed" for status in statuses):
+        return "reviewed"
+    if any(status == "needs-review" for status in statuses):
+        return "needs-review"
+    return ""
+
+
+def figure_row_status_class(status: sqlite3.Row | None) -> str:
+    if not status or not status["first_taught"]:
+        return ""
+    if needs_review(status):
+        return "needs-review"
+    if status["last_reviewed"]:
+        return "reviewed"
+    return ""
+
+
+def filter_figures(
+    figures: list[sqlite3.Row],
+    status: dict[int, sqlite3.Row],
+    view: str,
+) -> list[sqlite3.Row]:
+    if view == "new":
+        return [
+            figure
+            for figure in figures
+            if not (status.get(figure["id"]) and status[figure["id"]]["first_taught"])
+        ][:10]
+    if view == "review":
+        return sorted(
+            [figure for figure in figures if needs_review(status.get(figure["id"]))],
+            key=lambda figure: status[figure["id"]]["last_taught"] or "",
+            reverse=True,
+        )
+    return figures
+
+
+def needs_review(status: sqlite3.Row | None) -> bool:
+    if not status or not status["first_taught"]:
+        return False
+    if not status["last_reviewed"]:
+        return True
+    return (status["last_taught"] or "") > status["last_reviewed"]
+
+
+def figure_status_payload(
+    figure: sqlite3.Row, status: sqlite3.Row | None
+) -> dict[str, Any]:
+    first_taught = status["first_taught"] if status else None
+    last_taught = status["last_taught"] if status else None
+    last_reviewed = status["last_reviewed"] if status else None
+    return {
+        "id": figure["id"],
+        "number": figure["number"],
+        "family": figure["family"],
+        "call_name": figure["call_name"],
+        "teached": bool(first_taught),
+        "reviewed": bool(last_reviewed),
+        "first_taught": first_taught,
+        "last_taught": last_taught,
+        "last_reviewed": last_reviewed,
+    }
+
+
+def visible_class(conn: sqlite3.Connection, user: sqlite3.Row | None, class_id: int):
+    if not user:
+        return None
+    if user["role"] == "admin":
+        return conn.execute(
+            """
+            SELECT classes.*, programs.name AS program_name
+            FROM classes
+            JOIN programs ON programs.id = classes.program_id
+            WHERE classes.id = ?
+            """,
+            (class_id,),
+        ).fetchone()
+    return conn.execute(
+        """
+        SELECT classes.*, programs.name AS program_name
+        FROM classes
+        JOIN programs ON programs.id = classes.program_id
+        JOIN caller_class_access access ON access.class_id = classes.id
+        WHERE classes.id = ? AND access.user_id = ? AND classes.active = 1
+        """,
+        (class_id, user["id"]),
+    ).fetchone()
+
+
+def public_class(conn: sqlite3.Connection, class_id: int):
+    return conn.execute(
+        """
+        SELECT classes.*, programs.name AS program_name
+        FROM classes
+        JOIN programs ON programs.id = classes.program_id
+        WHERE classes.id = ? AND classes.active = 1
+        """,
+        (class_id,),
+    ).fetchone()
+
+
+def action_label(action: str) -> str:
+    return "geteacht" if action == "taught" else "wiederholt"
+
+
+def run(host: str = "127.0.0.1", port: int = 41234) -> None:
+    app = create_app()
+    app.run(host=host, port=port)
