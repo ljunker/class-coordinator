@@ -192,6 +192,43 @@ class AppTests(unittest.TestCase):
         self.assertIn(b'name="taught"', response.data)
         self.assertIn("Einträge speichern".encode(), response.data)
 
+    def test_reset_class_button_is_admin_only(self):
+        class_id = self.create_class("Reset Button Class")
+
+        public_response = self.client.get(f"/classes/{class_id}")
+        self.login_admin()
+        admin_response = self.client.get(f"/classes/{class_id}")
+
+        self.assertEqual(public_response.status_code, 200)
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertNotIn("Zurücksetzen".encode(), public_response.data)
+        self.assertIn("Zurücksetzen".encode(), admin_response.data)
+        self.assertIn(f'action="/admin/classes/{class_id}/reset"'.encode(), admin_response.data)
+
+    def test_admin_can_reset_class_events(self):
+        class_id = self.create_class("Reset Class")
+        figures = self.first_figures(2)
+        self.add_event(class_id, figures[0]["id"], "taught", "2026-09-01")
+        self.add_event(class_id, figures[1]["id"], "reviewed", "2026-09-02")
+        self.login_admin()
+
+        response = self.client.post(
+            f"/admin/classes/{class_id}/reset",
+            follow_redirects=False,
+        )
+
+        with self.connect() as conn:
+            event_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM figure_events WHERE class_id = ?",
+                (class_id,),
+            ).fetchone()["count"]
+            klass = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], f"/classes/{class_id}")
+        self.assertEqual(event_count, 0)
+        self.assertEqual(klass["name"], "Reset Class")
+
     def test_class_detail_new_filter_shows_next_ten_untaught_figures(self):
         class_id = self.create_class("Filter Class")
         figures = self.first_figures(13)

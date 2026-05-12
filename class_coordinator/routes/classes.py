@@ -77,6 +77,25 @@ def register_class_routes(app: Flask) -> None:
         flash("Class gespeichert")
         return redirect(url_for("class_detail", class_id=saved_id))
 
+    @app.post("/admin/classes/<int:class_id>/reset")
+    @admin_required
+    def reset_class(class_id: int) -> Response | tuple[str, int]:
+        with connect() as conn:
+            klass = visible_class(conn, g.user, class_id)
+            if not klass:
+                return (
+                    render_template(
+                        "error.html",
+                        title="Nicht gefunden",
+                        user=g.user,
+                        message="Class nicht gefunden.",
+                    ),
+                    404,
+                )
+            conn.execute("DELETE FROM figure_events WHERE class_id = ?", (class_id,))
+        flash("Class zurückgesetzt")
+        return redirect(url_for("class_detail", class_id=class_id))
+
     @app.get("/classes/<int:class_id>")
     def class_detail(class_id: int) -> str | tuple[str, int]:
         data = class_detail_context(g.user, class_id, request.args.get("view", "all"))

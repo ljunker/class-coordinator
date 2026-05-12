@@ -60,6 +60,11 @@ button, .button {
   color: var(--text);
 }
 .secondary:hover { background: #d7dee3; }
+.danger {
+  background: #b42318;
+  color: white;
+}
+.danger:hover { background: #8f1c14; }
 .link-button {
   color: var(--accent-dark);
   background: transparent;
@@ -124,6 +129,12 @@ fieldset {
   gap: 16px;
   margin-bottom: 16px;
 }
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toolbar-actions form { margin: 0; }
 .filter-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -246,6 +257,7 @@ tr.family-row.reviewed th {
   nav { flex-wrap: wrap; }
   nav form { margin-left: 0; }
   .toolbar, .list-row { align-items: flex-start; flex-direction: column; }
+  .toolbar-actions { flex-wrap: wrap; }
   .mark-bar { grid-template-columns: 1fr; }
   table { display: block; overflow-x: auto; }
   h1 { font-size: 26px; }
