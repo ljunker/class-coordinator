@@ -48,22 +48,26 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='ein-langes-passwort' docker compose up -d -
 Die App lauscht im Container auf Port `41234` und wird durch Compose nur auf
 `127.0.0.1:41234` veröffentlicht. Die SQLite-Datenbank liegt persistent im
 Volume `class-coordinator-data` unter `/data/class_coordinator.sqlite3`.
+Compose setzt außerdem Labels für Tinyauth mit der App-Domain
+`class.kryptikk.de`. Die öffentlichen Class-Ansichten
+`/classes/<id>` und `/classes/<id>/status.json` bleiben per Tinyauth-Regex ohne
+Login erreichbar.
 
-Für einen Nginx Reverse Proxy unter `/class` kann die App lokal so angebunden
-werden:
+Für einen Nginx Reverse Proxy auf `class.kryptikk.de` kann die App lokal so
+angebunden werden:
 
 ```nginx
-location = /class {
-    return 301 /class/$is_args$args;
-}
+server {
+    server_name class.kryptikk.de;
 
-location ^~ /class/ {
-    proxy_pass http://127.0.0.1:41234;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Prefix /class;
+    location / {
+        proxy_pass http://127.0.0.1:41234;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
 ```
 

@@ -12,6 +12,9 @@ services:
       - "127.0.0.1:41234:41234"
     volumes:
       - class-coordinator-data:/data
+    labels:
+      tinyauth.apps.classcoordinator.config.domain: class.kryptikk.de
+      tinyauth.apps.classcoordinator.path.allow: ^/classes/[0-9]+(/status\.json)?$
     healthcheck:
       test:
         [
