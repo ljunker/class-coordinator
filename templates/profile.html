@@ -8,18 +8,7 @@
   <label>Anzeigename
     <input name="display_name" required value="{{ user['display_name'] }}">
   </label>
-  <fieldset class="stack">
-    <legend>Passwort ändern</legend>
-    <label>Aktuelles Passwort
-      <input type="password" name="current_password" autocomplete="current-password">
-    </label>
-    <label>Neues Passwort
-      <input type="password" name="new_password" autocomplete="new-password">
-    </label>
-    <label>Neues Passwort wiederholen
-      <input type="password" name="new_password_confirm" autocomplete="new-password">
-    </label>
-  </fieldset>
+  <p>Passwort und Login werden in Tinyauth verwaltet.</p>
   <button type="submit">Profil speichern</button>
 </form>
 {% endblock %}

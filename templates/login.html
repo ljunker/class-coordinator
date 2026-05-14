@@ -2,14 +2,6 @@
 {% block content %}
 <section class="auth-panel">
   <h1>Class Coordinator</h1>
-  <form method="post" action="{{ url_for('login') }}" class="stack">
-    <label>Benutzername
-      <input name="username" autocomplete="username" required autofocus>
-    </label>
-    <label>Passwort
-      <input type="password" name="password" autocomplete="current-password" required>
-    </label>
-    <button type="submit">Anmelden</button>
-  </form>
+  <p>Der Login läuft über Tinyauth. Wenn du diese Seite direkt siehst, wurde die Anfrage nicht durch Tinyauth authentifiziert oder der Tinyauth-User ist in Class Coordinator noch nicht freigeschaltet.</p>
 </section>
 {% endblock %}

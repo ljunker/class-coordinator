@@ -6,7 +6,7 @@
 </div>
 <table>
   <thead>
-    <tr><th>Name</th><th>Login</th><th>Rolle</th><th>Status</th><th>Passwort</th><th></th></tr>
+    <tr><th>Name</th><th>Tinyauth-Login</th><th>Rolle</th><th>Status</th><th></th></tr>
   </thead>
   <tbody>
     {% for account in users %}
@@ -15,12 +15,6 @@
         <td>{{ account["username"] }}</td>
         <td>{{ account["role"] }}</td>
         <td>{{ "aktiv" if account["active"] else "inaktiv" }}</td>
-        <td>
-          <form method="post" action="{{ url_for('set_user_password', user_id=account['id']) }}" class="inline-form">
-            <input type="password" name="password" placeholder="neues Passwort" required autocomplete="new-password">
-            <button type="submit">Setzen</button>
-          </form>
-        </td>
         <td>
           {% if account["id"] != user["id"] %}
             <form method="post" action="{{ url_for('toggle_user', user_id=account['id']) }}">

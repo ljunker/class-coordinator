@@ -6,7 +6,6 @@ from flask import Flask, Response, flash, g, redirect, render_template, request,
 
 from ..auth import admin_required
 from ..db import connect, now_iso
-from ..security import hash_password
 
 
 def register_admin_routes(app: Flask) -> None:
@@ -27,10 +26,12 @@ def register_admin_routes(app: Flask) -> None:
     def create_user() -> Response:
         display_name = request.form.get("display_name", "").strip()
         username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
         role = request.form.get("role", "caller")
         if role not in {"admin", "caller"}:
             role = "caller"
+        if not display_name or not username:
+            flash("Anzeigename und Tinyauth-Login sind Pflicht")
+            return redirect(url_for("users_page"))
         try:
             with connect() as conn:
                 conn.execute(
@@ -39,32 +40,12 @@ def register_admin_routes(app: Flask) -> None:
                         (username, display_name, password_hash, role, active, created_at)
                     VALUES (?, ?, ?, ?, 1, ?)
                     """,
-                    (username, display_name, hash_password(password), role, now_iso()),
+                    (username, display_name, "", role, now_iso()),
                 )
         except sqlite3.IntegrityError:
-            flash("Benutzername existiert schon")
+            flash("Tinyauth-Login existiert schon")
             return redirect(url_for("users_page"))
         flash("Account angelegt")
-        return redirect(url_for("users_page"))
-
-    @app.post("/admin/users/<int:user_id>/password")
-    @admin_required
-    def set_user_password(user_id: int) -> Response:
-        password = request.form.get("password", "")
-        if not password:
-            flash("Passwort darf nicht leer sein")
-            return redirect(url_for("users_page"))
-        with connect() as conn:
-            user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
-            if not user:
-                flash("Account nicht gefunden")
-                return redirect(url_for("users_page"))
-            conn.execute(
-                "UPDATE users SET password_hash = ? WHERE id = ?",
-                (hash_password(password), user_id),
-            )
-            conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        flash("Passwort gesetzt")
         return redirect(url_for("users_page"))
 
     @app.post("/admin/users/<int:user_id>/toggle")
@@ -78,6 +59,5 @@ def register_admin_routes(app: Flask) -> None:
                 "UPDATE users SET active = CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id = ?",
                 (user_id,),
             )
-            conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         flash("Account aktualisiert")
         return redirect(url_for("users_page"))

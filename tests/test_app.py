@@ -1,4 +1,3 @@
-import json
 import os
 import sqlite3
 import tempfile
@@ -15,11 +14,9 @@ class AppTests(unittest.TestCase):
         import importlib
         import class_coordinator.config
         import class_coordinator.db
-        import class_coordinator.security
         import class_coordinator.web
 
         self.config = importlib.reload(class_coordinator.config)
-        self.security = importlib.reload(class_coordinator.security)
         self.db = importlib.reload(class_coordinator.db)
         self.web = importlib.reload(class_coordinator.web)
         self.app = self.web.create_app()
@@ -35,11 +32,9 @@ class AppTests(unittest.TestCase):
         return conn
 
     def login_admin(self):
-        return self.client.post(
-            "/login",
-            data={"username": "admin", "password": "admin123"},
-            follow_redirects=False,
-        )
+        self.client.environ_base["HTTP_REMOTE_USER"] = "admin"
+        self.client.environ_base["HTTP_REMOTE_NAME"] = "Administrator"
+        self.client.environ_base["HTTP_REMOTE_EMAIL"] = "admin@kryptikk.de"
 
     def create_class(self, name="Test Class"):
         with self.db.connect() as conn:
@@ -125,24 +120,27 @@ class AppTests(unittest.TestCase):
             ],
         )
 
-    def test_password_hash_roundtrip(self):
-        encoded = self.security.hash_password("secret")
+    def test_tinyauth_remote_user_header_loads_local_user(self):
+        self.login_admin()
 
-        self.assertTrue(self.security.verify_password("secret", encoded))
-        self.assertFalse(self.security.verify_password("wrong", encoded))
-        self.assertTrue(encoded.startswith("$2b$13$"))
+        response = self.client.get("/classes")
 
-    def test_forwarded_prefix_rewrites_redirects_and_html_links(self):
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Classes", response.data)
+
+    def test_unknown_tinyauth_user_is_not_authorized(self):
         response = self.client.get(
-            "/class/classes",
-            headers={"X-Forwarded-Prefix": "/class"},
+            "/classes",
+            headers={"Remote-User": "unknown"},
             follow_redirects=False,
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"], "/class/login")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("nicht freigeschaltet".encode(), response.data)
 
+    def test_forwarded_prefix_rewrites_html_links(self):
         class_id = self.create_class("Prefix Class")
+        self.login_admin()
         response = self.client.get(
             f"/class/classes/{class_id}",
             headers={"X-Forwarded-Prefix": "/class"},
@@ -177,8 +175,10 @@ class AppTests(unittest.TestCase):
     def test_class_detail_is_public_read_only(self):
         class_id = self.create_class("Public Class")
         response = self.client.get(f"/classes/{class_id}")
+        mark_response = self.client.post(f"/classes/{class_id}/mark")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(mark_response.status_code, 401)
         self.assertIn(b"Public Class", response.data)
         self.assertNotIn(b'name="taught"', response.data)
         self.assertNotIn("Einträge speichern".encode(), response.data)
@@ -336,16 +336,11 @@ class AppTests(unittest.TestCase):
                 (program["id"],),
             ).fetchall()
 
-    def test_user_can_update_display_name_and_password(self):
+    def test_user_can_update_display_name(self):
         self.login_admin()
         response = self.client.post(
             "/profile",
-            data={
-                "display_name": "New Name",
-                "current_password": "admin123",
-                "new_password": "new-secret",
-                "new_password_confirm": "new-secret",
-            },
+            data={"display_name": "New Name"},
             follow_redirects=False,
         )
 
@@ -354,31 +349,27 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(updated["display_name"], "New Name")
-        self.assertTrue(self.security.verify_password("new-secret", updated["password_hash"]))
 
-    def test_admin_can_reset_user_password(self):
-        with self.db.connect() as conn:
-            user_id = conn.execute(
-                """
-                INSERT INTO users
-                    (username, display_name, password_hash, role, active, created_at)
-                VALUES ('caller', 'Caller', ?, 'caller', 1, ?)
-                """,
-                (self.security.hash_password("old-secret"), self.db.now_iso()),
-            ).lastrowid
+    def test_admin_can_create_tinyauth_user_profile(self):
         self.login_admin()
 
         response = self.client.post(
-            f"/admin/users/{user_id}/password",
-            data={"password": "reset-secret"},
+            "/admin/users/new",
+            data={
+                "display_name": "Caller One",
+                "username": "caller1",
+                "role": "caller",
+            },
             follow_redirects=False,
         )
 
         with self.db.connect() as conn:
-            updated = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            created = conn.execute("SELECT * FROM users WHERE username = 'caller1'").fetchone()
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(self.security.verify_password("reset-secret", updated["password_hash"]))
+        self.assertEqual(created["display_name"], "Caller One")
+        self.assertEqual(created["role"], "caller")
+        self.assertEqual(created["password_hash"], "")
 
 
 if __name__ == "__main__":

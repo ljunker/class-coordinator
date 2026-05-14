@@ -6,7 +6,6 @@ import os
 import sqlite3
 
 from .config import DATA_DIR, DB_PATH
-from .security import hash_password
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -39,7 +38,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
+                password_hash TEXT NOT NULL DEFAULT '',
                 role TEXT NOT NULL CHECK (role IN ('admin', 'caller')),
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
@@ -222,15 +221,11 @@ def seed_admin(conn: sqlite3.Connection) -> None:
     if admin_count:
         return
     username = os.environ.get("ADMIN_USERNAME", "admin")
-    password = os.environ.get("ADMIN_PASSWORD", "admin123")
     conn.execute(
         """
         INSERT INTO users (username, display_name, password_hash, role, active, created_at)
         VALUES (?, ?, ?, 'admin', 1, ?)
         """,
-        (username, "Administrator", hash_password(password), now_iso()),
+        (username, "Administrator", "", now_iso()),
     )
-    print(
-        f"Created initial admin account: {username} / {password}. "
-        "Change the password after first login."
-    )
+    print(f"Created initial admin profile for Tinyauth user: {username}.")

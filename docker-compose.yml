@@ -7,14 +7,11 @@ services:
       PORT: 41234
       CLASS_COORDINATOR_DB: /data/class_coordinator.sqlite3
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      TINYAUTH_LOGOUT_URL: ${TINYAUTH_LOGOUT_URL:-https://auth.kryptikk.de/logout}
     ports:
       - "127.0.0.1:41234:41234"
     volumes:
       - class-coordinator-data:/data
-    labels:
-      tinyauth.apps.classcoordinator.config.domain: class.kryptikk.de
-      tinyauth.apps.classcoordinator.path.allow: ^/classes/[0-9]+(/status\.json)?$
     healthcheck:
       test:
         [
