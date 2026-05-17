@@ -10,6 +10,7 @@ class AppTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "test.sqlite3"
         os.environ["CLASS_COORDINATOR_DB"] = str(self.db_path)
+        os.environ["TINYAUTH_LOGOUT_URL"] = "https://auth.kryptikk.de/logout"
 
         import importlib
         import class_coordinator.config
@@ -25,6 +26,7 @@ class AppTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
         os.environ.pop("CLASS_COORDINATOR_DB", None)
+        os.environ.pop("TINYAUTH_LOGOUT_URL", None)
 
     def connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -137,6 +139,22 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("nicht freigeschaltet".encode(), response.data)
+
+    def test_logout_redirects_to_tinyauth_with_current_app_url(self):
+        response = self.client.post(
+            "/logout",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "class.kryptikk.de",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.headers["Location"],
+            "https://auth.kryptikk.de/logout?redirect_uri=https%3A%2F%2Fclass.kryptikk.de%2F",
+        )
 
     def test_forwarded_prefix_rewrites_html_links(self):
         class_id = self.create_class("Prefix Class")

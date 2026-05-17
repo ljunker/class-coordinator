@@ -62,6 +62,10 @@ Class Coordinator lauscht lokal auf `127.0.0.1:41234`. Tinyauth lauscht lokal
 auf `127.0.0.1:3000`. Die SQLite-Datenbanken liegen persistent in den Volumes
 `class-coordinator-data` und `tinyauth-data`.
 
+`TINYAUTH_LOGOUT_URL` ist nur die Logout-Basis, zum Beispiel
+`https://auth.kryptikk.de/logout`. Class Coordinator hängt beim Logout die
+aktuelle öffentliche App-URL automatisch als `redirect_uri` an.
+
 ## Nginx mit Tinyauth
 
 Tinyauth selbst läuft unter `auth.kryptikk.de`:
