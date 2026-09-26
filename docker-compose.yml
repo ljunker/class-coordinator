@@ -1,6 +1,6 @@
 services:
   class-coordinator:
-    build: .
+    image: kryptikker/class-coordinator:1.0.0
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
